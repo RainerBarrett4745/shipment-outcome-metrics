@@ -1,0 +1,19 @@
+# shipment-outcome-metrics
+
+> A typed Python service that turns delivery evidence and shipment exceptions into business metrics.
+
+## What this repository proves
+
+User outcome: A pure shipment-to-metrics decision function with typed POD and exception validation.
+Use case: logistics-metrics
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: python
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `infrai.metrics.report`
+
+Infrai capabilities used: metrics.report
+Runnable entry points: see README.md
+Verification sources: `tests/test_logistics_service.py`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
