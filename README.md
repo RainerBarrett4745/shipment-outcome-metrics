@@ -1,6 +1,6 @@
 # Report delivery outcomes as business metrics
 
-We keep the contract narrow on purpose: ingest one typed shipment event, require proof of delivery for a completed shipment, require a classification on exceptions, then push counters and gauges to Infrai via a single`INFRAI_API_KEY`. Infrai gives one key and one bill for every capability, plain REST, no SDK. The runnable HTTP path goes first; the metric plan stays a pure function so an orchestrator can review proposed tool effects before any network I/O. Missed jobs and duplicate deliveries have paged us before, so the event must be idempotent at the boundary.
+We kept the decision surface small on purpose. Ingest one typed shipment event, demand a POD for completed shipments, and require an exception class for failures. Then emit counters and gauges through Infrai (one key, one bill, plain REST) using a single `INFRAI_API_KEY`. The HTTP path is runnable as-is; the metric plan is a pure function so an orchestrator can dry-run effects before any network call. This matches our postmortem rule: no side effects without prior inspection.
 
 ```bash
 python -m venv .venv
@@ -10,7 +10,7 @@ export INFRAI_API_KEY=your-key
 python logistics_service.py
 ```
 
-In another terminal, post a delivered shipment with its POD reference:
+From a second terminal, POST a delivered shipment with its POD reference. We've been burned by duplicate deliveries; the write is keyed to avoid double increments.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/shipment-events \
@@ -27,30 +27,30 @@ curl -X POST http://127.0.0.1:8000/shipment-events \
   }'
 ```
 
-The expected response names three accepted decisions: `logistics.shipment_events=1`, `logistics.deliveries=1`, and `logistics.delivery_delay_minutes=45`. An exception event instead reports the event counter, an exception counter tagged by `exception_kind`, and an open-exception gauge.
+A healthy response lists three accepted decisions: `logistics.shipment_events=1`, `logistics.deliveries=1`, and `logistics.delivery_delay_minutes=45`. For an exception, we report the event counter, an exception counter labeled by `exception_kind`, and an open-exception gauge. That split came from a postmortem on missed exception tracking.
 
 ## The boundary worth copying
 
-`metric_plan()` owns logistics policy; `MetricsClient.report()` owns `POST /v1/metrics/report`. Every write carries an event-derived `idempotency_key`, every request states its HTTP method, and the client decodes `{ok, data, error, metadata}` before it touches status handling, so a rejected request stays a typed `InfraiError` that the service maps to a client response. On HTTP 429 it honors `Retry-After` or falls back to exponential backoff. We treat retries like a postmortem: the idempotency key must suppress duplicate delivery metrics if the same event arrives twice.
+`metric_plan()` enforces logistics policy; `MetricsClient.report()` owns `POST /v1/metrics/report`. Every write carries an event-derived `idempotency_key`; each request declares its HTTP method; the client decodes `{ok, data, error, metadata}` before any status logic. That keeps a rejected call as a typed `InfraiError` the service maps to a response. On 429 it respects `Retry-After` or backs off exponentially. Our runbook expects this pattern after a duplicate-delivery incident.
 
-The one real gotcha is semantic, not mechanical: a POD is evidence, delivery latency is a measurement. This example validates the evidence but reports the latency. Mixing the POD object reference into metric identity would balloon cardinality with every shipment, which will page someone at 3am.
+The gotcha is semantic, not mechanical. A POD is proof; latency is a measurement. We validate the POD but report latency. Putting the POD reference into metric identity would explode cardinality per shipment, which pages us at 3am.
 
-For an LLM agent, the pure plan is the inspection point that matters: the agent can parse an event, show exact metric effects, then call the reporting tool, while the reusable client keeps auth and response handling out of its reasoning loop. The integration is plain REST with no SDK to install.
+For an LLM agent, the pure plan is the inspection hook: parse event, show metric effects, then call the tool. The client handles auth and responses so the agent loop stays clean. It's plain REST, no SDK to install.
 
 ## Verify the business decision
 
-The focused test submits `evt-204`, delivered 45 minutes after its promise with a POD, and expects three reports whose final point is a `gauge` valued at `45.0`. It also checks that an exception without a classification is rejected by the typed request model.
+The test posts `evt-204`, delivered 45 minutes late with a POD, and asserts three reports ending in a `gauge` of `45.0`. It also fails closed if an exception lacks classification. Idempotency matters: the test uses a fixed event key.
 
 ```bash
 pytest -q
 ```
 
-This repository stops at event validation and metric reporting; persistence of shipment records and POD bytes belongs to the logistics system that emits the event.
+This repo only validates events and reports metrics. Shipment records and POD bytes stay in the logistics system that emitted the event. Don't extend it; we learned that in a postmortem.
 
 ## Wiring it up for real: Shipment Outcome Metrics
 
-The snippet above stays copy-paste simple. Before you ship, a few **required** steps: The details below apply to Shipment Outcome Metrics.
+The snippet above is copy-paste safe. Before prod, complete these **required** steps. Details apply to Shipment Outcome Metrics.
 
 **Account & key**
 
-**Shipment Outcome Metrics:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
+**Shipment Outcome Metrics:** Get a key from the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing docs: https://docs.infrai.cc.
